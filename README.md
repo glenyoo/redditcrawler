@@ -1,2 +1,0 @@
-# redditcrawler
-Assessment.
