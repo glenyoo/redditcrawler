@@ -86,12 +86,12 @@ def main():
                 print("Crawl was done within the last 5 minutes. Skipping crawl.")
                 return
 
-            top_posts = crawl_top_posts(reddit, db)
-            report = generate_report(top_posts)
-            print(report)
-            with open("top_memes_report.txt", "w") as file:
-                file.write(report)
-            print("Report saved as 'top_memes_report.txt'.")
+            # top_posts = crawl_top_posts(reddit, db)
+            # report = generate_report(top_posts)
+            # print(report)
+            # with open("top_memes_report.txt", "w") as file:
+            #     file.write(report)
+            # print("Report saved as 'top_memes_report.txt'.")
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
