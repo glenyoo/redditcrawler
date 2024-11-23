@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import praw
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -5,6 +8,7 @@ from dotenv import load_dotenv
 import os
 import pymongo
 import uuid
+from telegram import Bot
 
 # Load environment variables from .env
 load_dotenv()
@@ -70,6 +74,15 @@ def generate_report(post_data):
         report_lines.append(line)
     return "\n".join(report_lines)
 
+def send_report_via_telegram(file_path):
+    """ Send the report file via Telegram """
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    bot = Bot(token=bot_token)
+    with open(file_path, "rb") as file:
+        bot.send_document(chat_id=chat_id, document=file)
+    print("Report sent via Telegram.")
+
 def main():
     try:
         print("Starting crawler...")
@@ -86,12 +99,14 @@ def main():
                 print("Crawl was done within the last 5 minutes. Skipping crawl.")
                 return
 
-            # top_posts = crawl_top_posts(reddit, db)
-            # report = generate_report(top_posts)
-            # print(report)
-            # with open("top_memes_report.txt", "w") as file:
-            #     file.write(report)
-            # print("Report saved as 'top_memes_report.txt'.")
+            top_posts = crawl_top_posts(reddit, db)
+            report = generate_report(top_posts)
+            print(report)
+            report_file_path = "top_memes_report.txt"
+            with open(report_file_path, "w") as file:
+                file.write(report)
+            print("Report saved as 'top_memes_report.txt'.")
+            send_report_via_telegram(report_file_path)
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
