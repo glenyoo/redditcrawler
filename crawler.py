@@ -1,12 +1,15 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import praw
 from pymongo import MongoClient
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
-import pymongo
 import uuid
 from telegram import Bot
 import asyncio
+import pytz
 
 # Load environment variables from .env
 load_dotenv()
@@ -37,8 +40,8 @@ def crawl_top_posts(reddit, db):
             "url": post.url,
             "upvotes": post.score,
             "comments_count": post.num_comments,
-            "created_utc": datetime.utcfromtimestamp(post.created_utc),
-            "crawled_at": datetime.utcnow()
+            "created_utc": datetime.fromtimestamp(post.created_utc, timezone.utc),
+            "crawled_at": datetime.now(timezone.utc)
         }
         post_data.append(post_entry)
 
@@ -63,18 +66,25 @@ def generate_report(post_data):
             f"   Posted on: {post['created_utc']}\n"
         )
         report_lines.append(line)
-    report_lines.append(f"\nReport generated at: {datetime.utcnow().isoformat()}\n")
+    
+    # Convert the current time to Singapore time
+    sg_timezone = pytz.timezone("Asia/Singapore")
+    sg_time = datetime.now(sg_timezone)
+    report_lines.append(f"\nReport generated at: {sg_time.strftime('%Y-%m-%d %H:%M SGT')}\n")
     return "\n".join(report_lines)
 
 def get_report_generation_time(report_file_path):
     """ Get the report generation time from the report file """
+    if not os.path.exists(report_file_path):
+        return None
     try:
         with open(report_file_path, "r") as file:
             lines = file.readlines()
             for line in lines:
                 if line.startswith("Report generated at:"):
                     timestamp_str = line.split("Report generated at:")[1].strip()
-                    return datetime.fromisoformat(timestamp_str)
+                    sg_timezone = pytz.timezone("Asia/Singapore")
+                    return datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M SGT').replace(tzinfo=sg_timezone)
     except Exception as e:
         print(f"Error reading report file: {e}")
     return None
@@ -101,14 +111,13 @@ def main():
         if db is not None:
             report_file_path = "top_memes_report.txt"
             report_generation_time = get_report_generation_time(report_file_path)
-            if report_generation_time and datetime.utcnow() - report_generation_time < timedelta(minutes=5):
+            if report_generation_time and datetime.now(pytz.timezone("Asia/Singapore")) - report_generation_time < timedelta(minutes=5):
                 print("Last report was generated less than 5 minutes ago. Skipping crawl.")
                 asyncio.run(send_report_via_telegram(report_file_path))
                 return
 
             top_posts = crawl_top_posts(reddit, db)
             report = generate_report(top_posts)
-            # print(report)
             with open(report_file_path, "w") as file:
                 file.write(report)
             print("Report saved as 'top_memes_report.txt'.")
