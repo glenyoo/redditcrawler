@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import praw
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -9,6 +6,7 @@ import os
 import pymongo
 import uuid
 from telegram import Bot
+import asyncio
 
 # Load environment variables from .env
 load_dotenv()
@@ -24,13 +22,6 @@ def connect_to_mongo():
     except Exception as e:
         print(f"Error connecting to MongoDB: {e}")
         return None
-
-def get_last_crawl_time(db):
-    """ Get the last crawl time from the database """
-    last_post = db.memes.find_one(sort=[("crawled_at", pymongo.DESCENDING)])
-    if last_post:
-        return last_post["crawled_at"]
-    return None
 
 def crawl_top_posts(reddit, db):
     """ Crawl the top 20 posts from r/memes in the past 24 hours """
@@ -72,15 +63,29 @@ def generate_report(post_data):
             f"   Posted on: {post['created_utc']}\n"
         )
         report_lines.append(line)
+    report_lines.append(f"\nReport generated at: {datetime.utcnow().isoformat()}\n")
     return "\n".join(report_lines)
 
-def send_report_via_telegram(file_path):
+def get_report_generation_time(report_file_path):
+    """ Get the report generation time from the report file """
+    try:
+        with open(report_file_path, "r") as file:
+            lines = file.readlines()
+            for line in lines:
+                if line.startswith("Report generated at:"):
+                    timestamp_str = line.split("Report generated at:")[1].strip()
+                    return datetime.fromisoformat(timestamp_str)
+    except Exception as e:
+        print(f"Error reading report file: {e}")
+    return None
+
+async def send_report_via_telegram(file_path):
     """ Send the report file via Telegram """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     bot = Bot(token=bot_token)
     with open(file_path, "rb") as file:
-        bot.send_document(chat_id=chat_id, document=file)
+        await bot.send_document(chat_id=chat_id, document=file)
     print("Report sent via Telegram.")
 
 def main():
@@ -94,19 +99,20 @@ def main():
         print("Reddit instance created")
         db = connect_to_mongo()
         if db is not None:
-            last_crawl_time = get_last_crawl_time(db)
-            if last_crawl_time and datetime.utcnow() - last_crawl_time < timedelta(minutes=5):
-                print("Crawl was done within the last 5 minutes. Skipping crawl.")
+            report_file_path = "top_memes_report.txt"
+            report_generation_time = get_report_generation_time(report_file_path)
+            if report_generation_time and datetime.utcnow() - report_generation_time < timedelta(minutes=5):
+                print("Last report was generated less than 5 minutes ago. Skipping crawl.")
+                asyncio.run(send_report_via_telegram(report_file_path))
                 return
 
             top_posts = crawl_top_posts(reddit, db)
             report = generate_report(top_posts)
-            print(report)
-            report_file_path = "top_memes_report.txt"
+            # print(report)
             with open(report_file_path, "w") as file:
                 file.write(report)
             print("Report saved as 'top_memes_report.txt'.")
-            send_report_via_telegram(report_file_path)
+            asyncio.run(send_report_via_telegram(report_file_path))
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
