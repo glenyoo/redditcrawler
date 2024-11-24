@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
 import uuid
-from telegram import Bot, Update, InputMediaDocument
+from telegram import Bot, Update, InputMediaPhoto, InputMediaDocument
 from telegram.ext import Application, CommandHandler, CallbackContext
 import asyncio
 import pytz
@@ -71,7 +71,8 @@ async def crawl_top_posts(reddit, db):
 
 def generate_text_report(post_data, file_path="top_memes_report.txt"):
     """ Generate and save a text report of the top 20 posts """
-    report_lines = ["Top 20 Trending Memes in the Last 24 Hours:\n"]
+    report_lines = ["Reddit Top 20 Meme Report\n"]
+    report_lines.append("Top 20 Trending Memes in the Last 24 Hours:\n")
     for idx, post in enumerate(post_data, start=1):
         line = (
             f"{idx}. Title: {post['title']}\n"
@@ -147,16 +148,29 @@ def generate_charts(post_data):
 
     print("Charts generated and saved.")
 
-async def send_combined_report_via_telegram(chat_id, file_paths, captions):
+async def send_combined_report_via_telegram(chat_id, chart_files, report_files, chart_captions, report_captions, article_header, article_footer):
     """ Send the combined report files via Telegram """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     bot = Bot(token=bot_token)
     try:
+        # Send the header
+        await bot.send_message(chat_id=chat_id, text=article_header)
+        
+        # Send the charts
         media_group = []
-        for file_path, caption in zip(file_paths, captions):
+        for file_path, caption in zip(chart_files, chart_captions):
             with open(file_path, "rb") as file:
-                media_group.append(InputMediaDocument(file, caption=caption))
+                media_group.append(InputMediaPhoto(file, caption=caption))
         await bot.send_media_group(chat_id=chat_id, media=media_group)
+        
+        # Send the reports
+        for file_path, caption in zip(report_files, report_captions):
+            with open(file_path, "rb") as file:
+                await bot.send_document(chat_id=chat_id, document=file, caption=caption)
+        
+        # Send the footer
+        await bot.send_message(chat_id=chat_id, text=article_footer)
+        
         print("Combined report sent via Telegram.")
     except Exception as e:
         print(f"Failed to send combined report: {e}")
@@ -175,34 +189,39 @@ async def run_crawler(update: Update, context: CallbackContext):
         db = connect_to_mongo()
         if db is not None:
             generate_new_reports = False
+            report_file_paths = ["top_memes_report.txt", "top_memes_report.csv"]
+            report_captions = ["Reddit Top 20 Meme Report (Text)", "Reddit Top 20 Meme Report (CSV)"]
+            chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
+            chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
             if is_recent_crawl(db):
                 print("Recent crawl detected. Skipping new crawl.")
-                report_file_paths = ["top_memes_report.txt", "top_memes_report.csv"]
-                captions = ["Top 20 Trending Memes (Text)", "Top 20 Trending Memes (CSV)"]
                 for report_file_path in report_file_paths:
                     if not os.path.exists(report_file_path):
                         print(f"Report file '{report_file_path}' does not exist. Generating new report.")
                         generate_new_reports = True
                         break
-                chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
                 for chart_file in chart_files:
                     if not os.path.exists(chart_file):
                         print(f"Chart file '{chart_file}' does not exist. Generating new charts.")
                         generate_new_reports = True
                         break
                 if not generate_new_reports:
-                    await send_combined_report_via_telegram(chat_id, report_file_paths + chart_files, captions + chart_captions)
+                    sg_timezone = pytz.timezone("Asia/Singapore")
+                    sg_time = datetime.now(sg_timezone)
+                    article_header = "Reddit Top 20 Meme Report\n\n"
+                    article_footer = f"\nReport generated at: {sg_time.strftime('%Y-%m-%d %H:%M SGT')}\n"
+                    await send_combined_report_via_telegram(chat_id, chart_files, report_file_paths, chart_captions, report_captions, article_header, article_footer)
                     return
 
             top_posts = await crawl_top_posts(reddit, db)
             text_report_path = generate_text_report(top_posts)
             csv_report_path = generate_csv_report(top_posts)
             generate_charts(top_posts)
-            report_file_paths = [text_report_path, csv_report_path]
-            captions = ["Top 20 Trending Memes (Text)", "Top 20 Trending Memes (CSV)"]
-            chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
-            chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
-            await send_combined_report_via_telegram(chat_id, report_file_paths + chart_files, captions + chart_captions)
+            sg_timezone = pytz.timezone("Asia/Singapore")
+            sg_time = datetime.now(sg_timezone)
+            article_header = "Reddit Top 20 Meme Report\n\n"
+            article_footer = f"\nReport generated at: {sg_time.strftime('%Y-%m-%d %H:%M SGT')}\n"
+            await send_combined_report_via_telegram(chat_id, chart_files, report_file_paths, chart_captions, report_captions, article_header, article_footer)
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
