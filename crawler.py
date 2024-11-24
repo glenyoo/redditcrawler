@@ -141,10 +141,9 @@ def generate_charts(post_data):
 
     print("Charts generated and saved.")
 
-async def send_combined_report_via_telegram(file_paths, captions):
+async def send_combined_report_via_telegram(chat_id, file_paths, captions):
     """ Send the combined report files via Telegram """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
     bot = Bot(token=bot_token)
     try:
         media_group = []
@@ -159,7 +158,8 @@ async def send_combined_report_via_telegram(file_paths, captions):
 async def run_crawler(update: Update, context: CallbackContext):
     """ Run the crawler and send the reports via Telegram """
     try:
-        print("Starting crawler...")
+        chat_id = update.effective_chat.id
+        print(f"Starting crawler for chat_id: {chat_id}")
         reddit = praw.Reddit(
             client_id=os.environ.get("REDDIT_CLIENT_ID"),
             client_secret=os.environ.get("REDDIT_CLIENT_SECRET"),
@@ -182,7 +182,7 @@ async def run_crawler(update: Update, context: CallbackContext):
                             generate_csv_report(top_posts, report_file_path)
                 chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
                 chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
-                await send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions)
+                await send_combined_report_via_telegram(chat_id, report_file_paths + chart_files, captions + chart_captions)
                 return
 
             top_posts = crawl_top_posts(reddit, db)
@@ -193,7 +193,7 @@ async def run_crawler(update: Update, context: CallbackContext):
             captions = ["Top 20 Trending Memes (Text)", "Top 20 Trending Memes (CSV)"]
             chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
             chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
-            await send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions)
+            await send_combined_report_via_telegram(chat_id, report_file_paths + chart_files, captions + chart_captions)
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
