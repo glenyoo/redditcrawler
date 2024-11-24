@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import praw
+import asyncpraw
 from pymongo import MongoClient
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -40,13 +40,13 @@ def is_recent_crawl(db):
     print("No recent crawl detected.")
     return False
 
-def crawl_top_posts(reddit, db):
+async def crawl_top_posts(reddit, db):
     """ Crawl the top 20 posts from r/memes in the past 24 hours """
-    subreddit = reddit.subreddit("memes")
+    subreddit = await reddit.subreddit("memes")
     top_posts = subreddit.top(time_filter="day", limit=20)
 
     post_data = []
-    for post in top_posts:
+    async for post in top_posts:
         post_entry = {
             "_id": str(uuid.uuid4()),  # Generate a new unique identifier
             "reddit_id": post.id,  # Store the Reddit post ID separately
@@ -93,13 +93,15 @@ def generate_text_report(post_data, file_path="top_memes_report.txt"):
 
 def generate_csv_report(post_data, file_path="top_memes_report.csv"):
     """ Generate and save a CSV report of the top 20 posts """
+    sg_timezone = pytz.timezone("Asia/Singapore")
     with open(file_path, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         # Write the header
         writer.writerow(["Title", "URL", "Upvotes", "Comments", "Posted On"])
         # Write data rows
         for post in post_data:
-            writer.writerow([post['title'], post['url'], post['upvotes'], post['comments_count'], post['created_utc']])
+            created_sg_time = post['created_utc'].astimezone(sg_timezone).strftime('%Y-%m-%d %H:%M:%S %Z')
+            writer.writerow([post['title'], post['url'], post['upvotes'], post['comments_count'], created_sg_time])
     print(f"CSV report saved as '{file_path}'.")
     return file_path
 
@@ -107,7 +109,12 @@ def generate_charts(post_data):
     """ Generate and save charts for analysis """
     # Convert post_data to a DataFrame
     import pandas as pd
+    sg_timezone = pytz.timezone("Asia/Singapore")
     df = pd.DataFrame(post_data)
+
+    # Convert created_utc to Singapore time
+    df['created_sg'] = df['created_utc'].apply(lambda x: x.astimezone(sg_timezone))
+    df['created_hour_sg'] = df['created_sg'].dt.hour
 
     # Engagement metrics (upvotes and comments)
     plt.figure(figsize=(10, 6))
@@ -129,11 +136,10 @@ def generate_charts(post_data):
     plt.close()
 
     # Posting times for patterns
-    df['created_hour'] = df['created_utc'].dt.hour
     plt.figure(figsize=(10, 6))
-    sns.histplot(df['created_hour'], bins=24, kde=False)
-    plt.title('Posting Times Distribution')
-    plt.xlabel('Hour of Day (UTC)')
+    sns.histplot(df['created_hour_sg'], bins=24, kde=False)
+    plt.title('Posting Times Distribution (SGT)')
+    plt.xlabel('Hour of Day (SGT)')
     plt.ylabel('Number of Posts')
     plt.tight_layout()
     plt.savefig('posting_times_chart.png')
@@ -160,7 +166,7 @@ async def run_crawler(update: Update, context: CallbackContext):
     try:
         chat_id = update.effective_chat.id
         print(f"Starting crawler for chat_id: {chat_id}")
-        reddit = praw.Reddit(
+        reddit = asyncpraw.Reddit(
             client_id=os.environ.get("REDDIT_CLIENT_ID"),
             client_secret=os.environ.get("REDDIT_CLIENT_SECRET"),
             user_agent=os.environ.get("REDDIT_USER_AGENT")
@@ -168,6 +174,7 @@ async def run_crawler(update: Update, context: CallbackContext):
         print("Reddit instance created")
         db = connect_to_mongo()
         if db is not None:
+            generate_new_reports = False
             if is_recent_crawl(db):
                 print("Recent crawl detected. Skipping new crawl.")
                 report_file_paths = ["top_memes_report.txt", "top_memes_report.csv"]
@@ -175,17 +182,19 @@ async def run_crawler(update: Update, context: CallbackContext):
                 for report_file_path in report_file_paths:
                     if not os.path.exists(report_file_path):
                         print(f"Report file '{report_file_path}' does not exist. Generating new report.")
-                        top_posts = crawl_top_posts(reddit, db)
-                        if report_file_path.endswith(".txt"):
-                            generate_text_report(top_posts, report_file_path)
-                        elif report_file_path.endswith(".csv"):
-                            generate_csv_report(top_posts, report_file_path)
+                        generate_new_reports = True
+                        break
                 chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
-                chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
-                await send_combined_report_via_telegram(chat_id, report_file_paths + chart_files, captions + chart_captions)
-                return
+                for chart_file in chart_files:
+                    if not os.path.exists(chart_file):
+                        print(f"Chart file '{chart_file}' does not exist. Generating new charts.")
+                        generate_new_reports = True
+                        break
+                if not generate_new_reports:
+                    await send_combined_report_via_telegram(chat_id, report_file_paths + chart_files, captions + chart_captions)
+                    return
 
-            top_posts = crawl_top_posts(reddit, db)
+            top_posts = await crawl_top_posts(reddit, db)
             text_report_path = generate_text_report(top_posts)
             csv_report_path = generate_csv_report(top_posts)
             generate_charts(top_posts)
