@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import asyncpraw
 from pymongo import MongoClient
 from datetime import datetime, timedelta, timezone
@@ -14,6 +11,8 @@ import pytz
 import csv
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+
 
 # Load environment variables from .env
 load_dotenv()
@@ -109,7 +108,6 @@ def generate_csv_report(post_data, file_path="top_memes_report.csv"):
 def generate_charts(post_data):
     """ Generate and save charts for analysis """
     # Convert post_data to a DataFrame
-    import pandas as pd
     sg_timezone = pytz.timezone("Asia/Singapore")
     df = pd.DataFrame(post_data)
 
