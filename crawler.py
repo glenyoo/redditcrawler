@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
 import uuid
-from telegram import Bot, InputMediaDocument
+from telegram import Bot, Update, InputMediaDocument
+from telegram.ext import Application, CommandHandler, CallbackContext
 import asyncio
 import pytz
 import csv
@@ -155,7 +156,8 @@ async def send_combined_report_via_telegram(file_paths, captions):
     except Exception as e:
         print(f"Failed to send combined report: {e}")
 
-def main():
+async def run_crawler(update: Update, context: CallbackContext):
+    """ Run the crawler and send the reports via Telegram """
     try:
         print("Starting crawler...")
         reddit = praw.Reddit(
@@ -180,7 +182,7 @@ def main():
                             generate_csv_report(top_posts, report_file_path)
                 chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
                 chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
-                asyncio.run(send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions))
+                await send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions)
                 return
 
             top_posts = crawl_top_posts(reddit, db)
@@ -191,10 +193,23 @@ def main():
             captions = ["Top 20 Trending Memes (Text)", "Top 20 Trending Memes (CSV)"]
             chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
             chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
-            asyncio.run(send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions))
+            await send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions)
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
 
+def main():
+    """ Start the bot """
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    application = Application.builder().token(bot_token).build()
+
+    # Add command handler to start the crawler
+    application.add_handler(CommandHandler("generate", run_crawler))
+
+    # Start the Bot
+    application.run_polling()
+    print("Bot started. Waiting for commands...")
+
 if __name__ == "__main__":
+    print("Bot started. Waiting for commands...")
     main()
