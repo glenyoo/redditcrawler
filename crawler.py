@@ -7,10 +7,12 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
 import uuid
-from telegram import Bot
+from telegram import Bot, InputMediaDocument
 import asyncio
 import pytz
 import csv
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Load environment variables from .env
 load_dotenv()
@@ -30,7 +32,12 @@ def connect_to_mongo():
 def is_recent_crawl(db):
     """ Check if there is a recent crawl in the past 5 minutes """
     recent_time = datetime.now(timezone.utc) - timedelta(minutes=5)
-    return db.memes.find_one({"crawled_at": {"$gte": recent_time}}) is not None
+    recent_crawl = db.memes.find_one({"crawled_at": {"$gte": recent_time}})
+    if recent_crawl:
+        print(f"Recent crawl detected at {recent_crawl['crawled_at']}.")
+        return True
+    print("No recent crawl detected.")
+    return False
 
 def crawl_top_posts(reddit, db):
     """ Crawl the top 20 posts from r/memes in the past 24 hours """
@@ -95,17 +102,58 @@ def generate_csv_report(post_data, file_path="top_memes_report.csv"):
     print(f"CSV report saved as '{file_path}'.")
     return file_path
 
-async def send_report_via_telegram(file_path, caption):
-    """ Send the report file via Telegram """
+def generate_charts(post_data):
+    """ Generate and save charts for analysis """
+    # Convert post_data to a DataFrame
+    import pandas as pd
+    df = pd.DataFrame(post_data)
+
+    # Engagement metrics (upvotes and comments)
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='upvotes', y='title', data=df.sort_values('upvotes', ascending=False))
+    plt.title('Top 20 Memes by Upvotes')
+    plt.xlabel('Upvotes')
+    plt.ylabel('Title')
+    plt.tight_layout()
+    plt.savefig('upvotes_chart.png')
+    plt.close()
+
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x='comments_count', y='title', data=df.sort_values('comments_count', ascending=False))
+    plt.title('Top 20 Memes by Comments')
+    plt.xlabel('Comments')
+    plt.ylabel('Title')
+    plt.tight_layout()
+    plt.savefig('comments_chart.png')
+    plt.close()
+
+    # Posting times for patterns
+    df['created_hour'] = df['created_utc'].dt.hour
+    plt.figure(figsize=(10, 6))
+    sns.histplot(df['created_hour'], bins=24, kde=False)
+    plt.title('Posting Times Distribution')
+    plt.xlabel('Hour of Day (UTC)')
+    plt.ylabel('Number of Posts')
+    plt.tight_layout()
+    plt.savefig('posting_times_chart.png')
+    plt.close()
+
+    print("Charts generated and saved.")
+
+async def send_combined_report_via_telegram(file_paths, captions):
+    """ Send the combined report files via Telegram """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     bot = Bot(token=bot_token)
     try:
-        with open(file_path, "rb") as file:
-            await bot.send_document(chat_id=chat_id, document=file, caption=caption)
-        print(f"Report '{file_path}' sent via Telegram.")
+        media_group = []
+        for file_path, caption in zip(file_paths, captions):
+            with open(file_path, "rb") as file:
+                media_group.append(InputMediaDocument(file, caption=caption))
+        await bot.send_media_group(chat_id=chat_id, media=media_group)
+        print("Combined report sent via Telegram.")
     except Exception as e:
-        print(f"Failed to send '{file_path}': {e}")
+        print(f"Failed to send combined report: {e}")
 
 def main():
     try:
@@ -121,6 +169,7 @@ def main():
             if is_recent_crawl(db):
                 print("Recent crawl detected. Skipping new crawl.")
                 report_file_paths = ["top_memes_report.txt", "top_memes_report.csv"]
+                captions = ["Top 20 Trending Memes (Text)", "Top 20 Trending Memes (CSV)"]
                 for report_file_path in report_file_paths:
                     if not os.path.exists(report_file_path):
                         print(f"Report file '{report_file_path}' does not exist. Generating new report.")
@@ -129,14 +178,20 @@ def main():
                             generate_text_report(top_posts, report_file_path)
                         elif report_file_path.endswith(".csv"):
                             generate_csv_report(top_posts, report_file_path)
-                    asyncio.run(send_report_via_telegram(report_file_path, "Top 20 Trending Memes"))
+                chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
+                chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
+                asyncio.run(send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions))
                 return
 
             top_posts = crawl_top_posts(reddit, db)
             text_report_path = generate_text_report(top_posts)
             csv_report_path = generate_csv_report(top_posts)
-            asyncio.run(send_report_via_telegram(text_report_path, "Top 20 Trending Memes (Text)"))
-            asyncio.run(send_report_via_telegram(csv_report_path, "Top 20 Trending Memes (CSV)"))
+            generate_charts(top_posts)
+            report_file_paths = [text_report_path, csv_report_path]
+            captions = ["Top 20 Trending Memes (Text)", "Top 20 Trending Memes (CSV)"]
+            chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
+            chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
+            asyncio.run(send_combined_report_via_telegram(report_file_paths + chart_files, captions + chart_captions))
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
