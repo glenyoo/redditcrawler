@@ -10,6 +10,7 @@ import uuid
 from telegram import Bot
 import asyncio
 import pytz
+import csv
 
 # Load environment variables from .env
 load_dotenv()
@@ -25,6 +26,11 @@ def connect_to_mongo():
     except Exception as e:
         print(f"Error connecting to MongoDB: {e}")
         return None
+
+def is_recent_crawl(db):
+    """ Check if there is a recent crawl in the past 5 minutes """
+    recent_time = datetime.now(timezone.utc) - timedelta(minutes=5)
+    return db.memes.find_one({"crawled_at": {"$gte": recent_time}}) is not None
 
 def crawl_top_posts(reddit, db):
     """ Crawl the top 20 posts from r/memes in the past 24 hours """
@@ -55,8 +61,8 @@ def crawl_top_posts(reddit, db):
     print(f"Stored {len(post_data)} posts from r/memes.")
     return post_data
 
-def generate_report(post_data):
-    """ Generate a report of the top 20 posts as a string """
+def generate_text_report(post_data, file_path="top_memes_report.txt"):
+    """ Generate and save a text report of the top 20 posts """
     report_lines = ["Top 20 Trending Memes in the Last 24 Hours:\n"]
     for idx, post in enumerate(post_data, start=1):
         line = (
@@ -71,32 +77,35 @@ def generate_report(post_data):
     sg_timezone = pytz.timezone("Asia/Singapore")
     sg_time = datetime.now(sg_timezone)
     report_lines.append(f"\nReport generated at: {sg_time.strftime('%Y-%m-%d %H:%M SGT')}\n")
-    return "\n".join(report_lines)
 
-def get_report_generation_time(report_file_path):
-    """ Get the report generation time from the report file """
-    if not os.path.exists(report_file_path):
-        return None
-    try:
-        with open(report_file_path, "r") as file:
-            lines = file.readlines()
-            for line in lines:
-                if line.startswith("Report generated at:"):
-                    timestamp_str = line.split("Report generated at:")[1].strip()
-                    sg_timezone = pytz.timezone("Asia/Singapore")
-                    return datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M SGT').replace(tzinfo=sg_timezone)
-    except Exception as e:
-        print(f"Error reading report file: {e}")
-    return None
+    with open(file_path, "w", encoding="utf-8") as file:
+        file.write("\n".join(report_lines))
+    print(f"Text report saved as '{file_path}'.")
+    return file_path
 
-async def send_report_via_telegram(file_path):
+def generate_csv_report(post_data, file_path="top_memes_report.csv"):
+    """ Generate and save a CSV report of the top 20 posts """
+    with open(file_path, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        # Write the header
+        writer.writerow(["Title", "URL", "Upvotes", "Comments", "Posted On"])
+        # Write data rows
+        for post in post_data:
+            writer.writerow([post['title'], post['url'], post['upvotes'], post['comments_count'], post['created_utc']])
+    print(f"CSV report saved as '{file_path}'.")
+    return file_path
+
+async def send_report_via_telegram(file_path, caption):
     """ Send the report file via Telegram """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     bot = Bot(token=bot_token)
-    with open(file_path, "rb") as file:
-        await bot.send_document(chat_id=chat_id, document=file)
-    print("Report sent via Telegram.")
+    try:
+        with open(file_path, "rb") as file:
+            await bot.send_document(chat_id=chat_id, document=file, caption=caption)
+        print(f"Report '{file_path}' sent via Telegram.")
+    except Exception as e:
+        print(f"Failed to send '{file_path}': {e}")
 
 def main():
     try:
@@ -109,19 +118,25 @@ def main():
         print("Reddit instance created")
         db = connect_to_mongo()
         if db is not None:
-            report_file_path = "top_memes_report.txt"
-            report_generation_time = get_report_generation_time(report_file_path)
-            if report_generation_time and datetime.now(pytz.timezone("Asia/Singapore")) - report_generation_time < timedelta(minutes=5):
-                print("Last report was generated less than 5 minutes ago. Skipping crawl.")
-                asyncio.run(send_report_via_telegram(report_file_path))
+            if is_recent_crawl(db):
+                print("Recent crawl detected. Skipping new crawl.")
+                report_file_paths = ["top_memes_report.txt", "top_memes_report.csv"]
+                for report_file_path in report_file_paths:
+                    if not os.path.exists(report_file_path):
+                        print(f"Report file '{report_file_path}' does not exist. Generating new report.")
+                        top_posts = crawl_top_posts(reddit, db)
+                        if report_file_path.endswith(".txt"):
+                            generate_text_report(top_posts, report_file_path)
+                        elif report_file_path.endswith(".csv"):
+                            generate_csv_report(top_posts, report_file_path)
+                    asyncio.run(send_report_via_telegram(report_file_path, "Top 20 Trending Memes"))
                 return
 
             top_posts = crawl_top_posts(reddit, db)
-            report = generate_report(top_posts)
-            with open(report_file_path, "w") as file:
-                file.write(report)
-            print("Report saved as 'top_memes_report.txt'.")
-            asyncio.run(send_report_via_telegram(report_file_path))
+            text_report_path = generate_text_report(top_posts)
+            csv_report_path = generate_csv_report(top_posts)
+            asyncio.run(send_report_via_telegram(text_report_path, "Top 20 Trending Memes (Text)"))
+            asyncio.run(send_report_via_telegram(csv_report_path, "Top 20 Trending Memes (CSV)"))
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")
