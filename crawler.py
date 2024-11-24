@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
 import uuid
-from telegram import Bot, Update, InputMediaPhoto, InputMediaDocument
+from telegram import Bot, Update, InputMediaDocument
 from telegram.ext import Application, CommandHandler, CallbackContext
 import asyncio
 import pytz
@@ -148,29 +148,16 @@ def generate_charts(post_data):
 
     print("Charts generated and saved.")
 
-async def send_combined_report_via_telegram(chat_id, chart_files, report_files, chart_captions, report_captions, article_header, article_footer):
+async def send_combined_report_via_telegram(chat_id, file_paths, captions):
     """ Send the combined report files via Telegram """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     bot = Bot(token=bot_token)
     try:
-        # Send the header
-        await bot.send_message(chat_id=chat_id, text=article_header)
-        
-        # Send the charts
         media_group = []
-        for file_path, caption in zip(chart_files, chart_captions):
+        for file_path, caption in zip(file_paths, captions):
             with open(file_path, "rb") as file:
-                media_group.append(InputMediaPhoto(file, caption=caption))
+                media_group.append(InputMediaDocument(file, caption=caption))
         await bot.send_media_group(chat_id=chat_id, media=media_group)
-        
-        # Send the reports
-        for file_path, caption in zip(report_files, report_captions):
-            with open(file_path, "rb") as file:
-                await bot.send_document(chat_id=chat_id, document=file, caption=caption)
-        
-        # Send the footer
-        await bot.send_message(chat_id=chat_id, text=article_footer)
-        
         print("Combined report sent via Telegram.")
     except Exception as e:
         print(f"Failed to send combined report: {e}")
@@ -190,7 +177,7 @@ async def run_crawler(update: Update, context: CallbackContext):
         if db is not None:
             generate_new_reports = False
             report_file_paths = ["top_memes_report.txt", "top_memes_report.csv"]
-            report_captions = ["Reddit Top 20 Meme Report (Text)", "Reddit Top 20 Meme Report (CSV)"]
+            captions = ["Reddit Top 20 Meme Report (Text)", "Reddit Top 20 Meme Report (CSV)"]
             chart_files = ["upvotes_chart.png", "comments_chart.png", "posting_times_chart.png"]
             chart_captions = ["Top 20 Memes by Upvotes", "Top 20 Memes by Comments", "Posting Times Distribution"]
             if is_recent_crawl(db):
@@ -210,7 +197,9 @@ async def run_crawler(update: Update, context: CallbackContext):
                     sg_time = datetime.now(sg_timezone)
                     article_header = "Reddit Top 20 Meme Report\n\n"
                     article_footer = f"\nReport generated at: {sg_time.strftime('%Y-%m-%d %H:%M SGT')}\n"
-                    await send_combined_report_via_telegram(chat_id, chart_files, report_file_paths, chart_captions, report_captions, article_header, article_footer)
+                    await update.message.reply_text(article_header)
+                    await send_combined_report_via_telegram(chat_id, chart_files + report_file_paths, chart_captions + captions)
+                    await update.message.reply_text(article_footer)
                     return
 
             top_posts = await crawl_top_posts(reddit, db)
@@ -221,7 +210,9 @@ async def run_crawler(update: Update, context: CallbackContext):
             sg_time = datetime.now(sg_timezone)
             article_header = "Reddit Top 20 Meme Report\n\n"
             article_footer = f"\nReport generated at: {sg_time.strftime('%Y-%m-%d %H:%M SGT')}\n"
-            await send_combined_report_via_telegram(chat_id, chart_files, report_file_paths, chart_captions, report_captions, article_header, article_footer)
+            await update.message.reply_text(article_header)
+            await send_combined_report_via_telegram(chat_id, chart_files + report_file_paths, chart_captions + captions)
+            await update.message.reply_text(article_footer)
         print("Crawler finished")
     except Exception as e:
         print(f"Error in main execution: {e}")

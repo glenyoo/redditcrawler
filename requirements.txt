@@ -1,0 +1,8 @@
+asyncpraw
+pymongo
+python-dotenv
+python-telegram-bot
+pytz
+matplotlib
+seaborn
+pandas
