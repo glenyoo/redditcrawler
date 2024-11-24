@@ -198,12 +198,20 @@ async def run_crawler(update: Update, context: CallbackContext):
     except Exception as e:
         print(f"Error in main execution: {e}")
 
+async def start(update: Update, context: CallbackContext):
+    """ Send a welcome message when the /start command is issued """
+    await update.message.reply_text(
+        "Welcome to the Reddit Meme Bot! This bot finds the top 20 trending memes from Reddit.\n"
+        "Use the /generate command to get the latest report."
+    )
+
 def main():
     """ Start the bot """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     application = Application.builder().token(bot_token).build()
 
-    # Add command handler to start the crawler
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("generate", run_crawler))
 
     # Start the Bot
